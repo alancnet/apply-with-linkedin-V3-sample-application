@@ -103,7 +103,7 @@
   <form id="profile-data-container" class="container well">
     <h4>Profile data will show here</h4>
     <div id="profile_data_form"></div>
-
+    <div id="signature-verification"></div>
     <div class="form-group">
       <label for="firstname">First Name</label>
       <input class="form-control" type="text" id="firstname">
@@ -140,6 +140,46 @@
   <script async defer>
     var editor;
 
+    const hexify = (buffer, minLength) => buffer.map(byte => byte.toString(16).padStart(2, '0')).join('').padStart(minLength, '0')
+
+    // ⚠️ This function should not be implemented on the client side in production code.
+    // It is only implemented here to demonstrate how to verify the signature.
+    async function verifySignature (data, signature, password) {
+      if (!window.crypto || !window.crypto.subtle) {
+        throw new Error('Browser does not support Web Cryptography API. Ensure your URL is http://localhost (not http://127.0.0.1) or 🔒https:// (not 🔓http://).')
+      }
+      // Encode the password and data as ArrayBuffers
+      const encoder = new TextEncoder()
+      const passwordData = encoder.encode(password)
+      const inputData = encoder.encode(data)
+
+      // Import the password as a CryptoKey
+      const passwordKey = await crypto.subtle.importKey(
+        'raw',
+        passwordData,
+        { name: 'HMAC', hash: 'SHA-256' },
+        true,
+        ['sign']
+      )
+      const keyData = new Uint8Array(await crypto.subtle.exportKey('raw', passwordKey))
+
+      // Generate the HMAC-SHA256 hash
+      const hashBuffer = await crypto.subtle.sign('HMAC', passwordKey, inputData)
+
+      // Convert the hash ArrayBuffer to a hex string
+      const hashArray = Array.from(new Uint8Array(hashBuffer))
+      const hmac = hexify(hashArray, 64)
+
+      console.group('%cSignature Verification:', 'font-weight: bold; font-size: 16px;')
+      console.info('Password     :', password)
+      console.info('Password Data:', hexify(keyData, 0))
+      console.info('Data         :', [data])
+      console.info('Input Data   :', [hexify(inputData, 64)])
+      console.info('Computed HMAC:', hmac)
+      console.info('Expected HMAC:', signature)
+      console.groupEnd()
+      return hmac === signature
+    }
 
     function handleProfileData(profileResponse, signature) {
       console.log('profileResponse', profileResponse);
@@ -163,8 +203,22 @@
       experienceField.value = JSON.stringify(profileData.positions);
       skillsField.value = JSON.stringify(profileData.skills);
     }
-    function handleProfileData(payload) {
-
+    function handleProfileData(payload, signature) {
+        verifySignature(
+          'hmacsha256=' + JSON.stringify(payload),
+          signature,
+          '<YOUR_SECRET_KEY>'
+        )
+          .then(matches => {
+            $('#signature-verification').html(
+              matches
+                ? '✅ Signature verified.'
+                : '❌ Signature verification failed. Check console for details.'
+            )
+          })
+          .catch(err => {
+            $('#signature-verification').html('⚠️ ' + err.message)
+          })
       $('#full-text').val(JSON.stringify(payload));
       $('#firstname').val(payload.firstName);
       $('#lastname').val(payload.lastName);
